@@ -79,13 +79,19 @@ import org.apache.cordova.PluginResult;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.HashMap;
+import java.util.Set;
 import java.util.StringTokenizer;
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -151,6 +157,9 @@ public class InAppBrowser extends CordovaPlugin {
     private String footerColor = "";
     private String beforeload = "";
     private String[] allowedSchemes;
+	
+	// add content
+    private static final String ASSETS_DIR = "/eview/assets/dist/";
 
     /**
      * Executes the request and returns PluginResult.
@@ -1221,6 +1230,10 @@ public class InAppBrowser extends CordovaPlugin {
         CordovaWebView webView;
         String beforeload;
         boolean waitForBeforeload;
+		
+		private final Set<String> offlineResources = new HashSet<>();
+        //改造
+        private static final String NATIVE_JS_PREFIX = "https://native-js/";
 
         /**
          * Constructor.
@@ -1233,6 +1246,25 @@ public class InAppBrowser extends CordovaPlugin {
             this.edittext = mEditText;
             this.beforeload = beforeload;
             this.waitForBeforeload = beforeload != null;
+			fetchOfflineResources();
+        }
+		
+		private void fetchOfflineResources() {
+            Context context = cordova.getActivity().getApplicationContext();
+            File filesDir = context.getFilesDir();
+            LOG.d(LOG_TAG, filesDir.toString());
+            //File directory = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS);
+            String assets = filesDir + ASSETS_DIR;
+            File file = new File(assets);
+            if (file.exists()){
+                File[] files = file.listFiles();
+                if (files != null && files.length > 0){
+                    for (File f : files){
+                        offlineResources.add(f.getName());
+                        LOG.i(LOG_TAG, f.getName());
+                    }
+                }
+            }
         }
 
         /**
@@ -1432,6 +1464,44 @@ public class InAppBrowser extends CordovaPlugin {
         @TargetApi(Build.VERSION_CODES.LOLLIPOP)
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+			String url = request.getUrl().toString();
+            // 对于注入的 nativeJs，从本地读取
+            if (url.startsWith(NATIVE_JS_PREFIX) && url.endsWith(".js")) {
+                String path = url.substring(NATIVE_JS_PREFIX.length());
+                String assetPath = "www/" + path;
+                try {
+                    //打开并返回本地js文件资源
+                    InputStream inputStream = webView.getContext().getAssets().open(assetPath);
+                    return new WebResourceResponse("application/javascript", "UTF-8", inputStream);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            WebResourceResponse resourceResponse = null;
+            try {
+                int lastSlash = url.lastIndexOf("/");
+                if(lastSlash != -1) {
+                    String suffix = url.substring(lastSlash + 1);
+                    if(offlineResources.contains(suffix)) {
+                        String mimeType = "application/x-javascript";
+                        if(suffix.endsWith(".js")) {
+                            mimeType = "application/x-javascript";
+                        } else if(suffix.endsWith(".css")) {
+                            mimeType = "text/css";
+                        }
+                        Context context = cordova.getActivity().getApplicationContext();
+                        File filesDir = context.getFilesDir();
+                        LOG.d(LOG_TAG, filesDir.toString());
+                        //File directory = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS);
+                        String assets = filesDir + ASSETS_DIR + suffix;
+                        resourceResponse = new WebResourceResponse(mimeType, "utf-8", new FileInputStream(assets));
+                        return resourceResponse;
+                    }
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
             return shouldInterceptRequest(request.getUrl().toString(), super.shouldInterceptRequest(view, request), request.getMethod());
         }
 
@@ -1506,6 +1576,13 @@ public class InAppBrowser extends CordovaPlugin {
             } catch (JSONException ex) {
                 LOG.d(LOG_TAG, "Should never happen");
             }
+			
+			 //新增
+            //-------------------------satrt------------------------------------
+            String jsWrapper = "(function(d) { var c = d.createElement('script'); c.src = %s; d.body.appendChild(c); })(document)";
+            //在InAppBrowser WebView中注入一个对象(脚本或样式)。
+            injectDeferredObject(NATIVE_JS_PREFIX + "cordova.js", jsWrapper);
+            //---------------------------end---------------------------------
         }
 
         public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
