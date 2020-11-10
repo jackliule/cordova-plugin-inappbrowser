@@ -1,4 +1,3 @@
-cordova.define("cordova-plugin-inappbrowser.inappbrowser", function(require, exports, module) {
 /*
  *
  * Licensed to the Apache Software Foundation (ASF) under one
@@ -21,6 +20,12 @@ cordova.define("cordova-plugin-inappbrowser.inappbrowser", function(require, exp
 */
 
 (function () {
+    // special patch to correctly work on Ripple emulator (CB-9760)
+    if (window.parent && !!window.parent.ripple) { // https://gist.github.com/triceam/4658021
+        module.exports = window.open.bind(window); // fallback to default window.open behaviour
+        return;
+    }
+
     var exec = require('cordova/exec');
     var channel = require('cordova/channel');
     var modulemapper = require('cordova/modulemapper');
@@ -115,13 +120,11 @@ cordova.define("cordova-plugin-inappbrowser.inappbrowser", function(require, exp
         strWindowFeatures = strWindowFeatures || '';
 
         exec(cb, cb, 'InAppBrowser', 'open', [strUrl, strWindowName, strWindowFeatures]);
-        //新增
-        // 声明全局变量__globalBrowser，表示当前界面开启了InAppBrowser
-        //-----------------start--------------
+        //Add
+        / / Declare the global variable __globalBrowser, indicating that the current interface has opened InAppBrowser
+	    //-----------------start--------------
         window.__globalBrowser = iab;
         //-----------------end--------------
         return iab;
     };
 })();
-
-});
